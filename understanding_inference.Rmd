@@ -1,5 +1,5 @@
 ---
-title: "Understanding Inference"
+title: "Understanding Bayesian Inference"
 author: "Zach Smith"
 output:
   html_document:
@@ -197,8 +197,14 @@ In order for us to optimize these parameters we need to define our loss function
 $$
 KL(q(\mu|x)||p(\mu|x)) = \int_\mu q(\mu|x) \log\frac{q(\mu|x)}{p(\mu|x)}d\mu = \\
 E[\log\frac{q(\mu|x)}{p(\mu|x)}] = \\
-E[\log q(\mu|x)] - E[\log p(\mu|x)] = \\
-E[\log q(\mu|x)] - \log p(x|\mu) - \log p(\mu)]
+E[\log q(\mu|x) - \log p(\mu, x) + \log p(x)]  = \\
+E[\log q(\mu|x) - \log p(x|\mu) + \log p(\mu) + \log p(x)]
+$$
+
+The last term $\log p(x)$ does not rely on $q(\mu|x)$ and is therefore constant within the optimization problem reducing the KL divergence to_search
+
+$$
+E[\log q(\mu|x) - \log p(x|\mu) + \log p(\mu)]
 $$
 
 Because the result is an expectation, we can calculate this by Monte Carlo sampling the approximate posterior and take the average of the resulting calculations.
@@ -292,7 +298,7 @@ to_search %>%
 
 ```{r gen latent variable data}
 N <- 60
-beta <- 5
+beta <- 2
 sigma <- 1
 x <- rnorm(N)
 y <- rnorm(N, x * beta, sigma)
@@ -308,62 +314,236 @@ prior_mu <- 0
 prior_sigma <- 1
 ndraws <- 100
 
-encoder <- function(x, params){
-  z <- x %*% t(params)
+normal_network <- function(x, params){
+  z <- x %*% params
   z[,2] <- exp(z[,2])
   z
 }
 
-kl_divergence <- function(y, sigma, prior_mu, prior_sigma, n_draws){
-  function(encoder_params, decoder_params){
-    posterior_vals <- encoder(y, encoder_params)
-    #calculate elbo
-    elbo <- sapply(1:ndraws, function(i){
-      #take samples from approximate distribution
-      z <- rnorm(length(y), posterior_vals[,1], posterior_vals[,2]) # fix
-      sum(dnorm(x, encoder(z, decoder_params), sigma, log = TRUE)) + 
-        sum(dnorm(z, prior_mu, prior_sigma, log = TRUE)) - 
-        sum(dnorm(z, posterior_vals[,1], posterior_vals[,2], log = TRUE))
-    })
-    mean(elbo)
-  }
+kl_divergence <- function(encoder_params, decoder_params){
+  posterior_vals <- normal_network(y, encoder_params)
+  #calculate elbo
+  kl <- sapply(1:ndraws, function(i){
+    #take samples from approximate distribution
+    z <- rnorm(length(x), posterior_vals[,1], posterior_vals[,2])
+    y_params <- normal_network(z, decoder_params)
+    kl_ <- sum(dnorm(z, posterior_vals[,1], posterior_vals[,2], log = TRUE)) - 
+      sum(dnorm(y, y_params[,1], y_params[,2], log = TRUE)) - 
+      sum(dnorm(z, prior_mu, prior_sigma, log = TRUE))
+    kl_
+  })
+  mean(kl)
 }
 
-to_optimize <- kl_divergence(x, sigma, prior_mu, prior_sigma, n_draws)
-
 # coordinate ascent
-encoder_params <- c(.10,.1)
-decoder_params <- c(.1,.1)
+encoder_params <- matrix(rnorm(2, 0, 0.1), nrow = 1)
+decoder_params <- matrix(rnorm(2, 0, 0.1), nrow = 1)
 
-iters <- 1000
+iters <- 100
 h <- 1e-2
-step_size <- 1e-3
-encoder_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>%  setNames(c("mu", "sigma"))
-decoder_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>%  setNames(c("mu", "sigma"))
-x_steps <- as.data.frame(matrix(0, nrow = iters, ncol = N)) %>%  setNames(c("mu", "sigma"))
+h1 <- c(h, 0)
+h2 <- c(0, h)
+step_size <- 1e-1
+encoder_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>%  setNames(c("b0", "b1"))
+decoder_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>%  setNames(c("b0", "b1"))
+x_steps <- as.data.frame(matrix(0, nrow = iters, ncol = N))
+kls <- c()
 for(i in 1:iters){
   #optimize encoder
   #step encoder b1
-  gradient <- (to_optimize(c(encoder_params[1] + h, encoder_params[2]), decoder_params) - to_optimize(encoder_params, decoder_params)) / h
-  encoder_params[1] <- encoder_params[1] + gradient * step_size
+  gradient <- (kl_divergence(encoder_params + h1, decoder_params) - kl_divergence(encoder_params, decoder_params)) / h
+  encoder_params <- encoder_params - h1 * gradient * step_size
   #step encoder b2
-  gradient <- (to_optimize(c(encoder_params[1], encoder_params[2] + h), decoder_params) - to_optimize(encoder_params, decoder_params)) / h
-  encoder_params[2] <- encoder_params[2] + gradient * step_size
+  gradient <- (kl_divergence(encoder_params + h2, decoder_params) - kl_divergence(encoder_params, decoder_params)) / h
+  encoder_params <- encoder_params - h2 * gradient * step_size
   #optimize decoder
-  #step encoder b1
-  gradient <- (to_optimize(encoder_params, c(decoder_params[1] + h, decoder_params[2])) - to_optimize(encoder_params, decoder_params)) / h
-  decoder_params[1] <- decoder_params[1] + gradient * step_size
-  #step encoder b2
-  gradient <- (to_optimize(encoder_params, c(decoder_params[1], decoder_params[2] + h)) - to_optimize(encoder_params, decoder_params)) / h
-  decoder_params[2] <- decoder_params[2] + gradient * step_size
+  #step decoder b1
+  gradient <- (kl_divergence(encoder_params, decoder_params + h1) - kl_divergence(encoder_params, decoder_params)) / h
+  decoder_params <- decoder_params - h1 * gradient * step_size
+  #step decoder b2
+  gradient <- (kl_divergence(encoder_params, decoder_params + h2) - kl_divergence(encoder_params, decoder_params)) / h
+  decoder_params <- decoder_params - h2 * gradient * step_size
   
   encoder_steps[i,] <- encoder_params
   decoder_steps[i,] <- decoder_params
-  x_steps[i,] <- encoder(y, encoder_params)
+  x_steps[i,] <- normal_network(y, encoder_params)[,1]
+  kls <- c(kls, kl_divergence(encoder_params, decoder_params))
 }
+encoder_params
+decoder_params
+```
+
+```{r}
+plot(kls, type = "l")
 ```
 
 ```{r plot actual vs latent posterior}
-plot(encoder(y, encoder_params)[,1] ~ x)
+plot(normal_network(y, encoder_params)[,1] ~ x)
 ```
 
+```{r, include = FALSE}
+library(gganimate)
+
+steps_df <- x_steps %>%
+  mutate(ix = row_number()) %>%
+  pivot_longer(-ix, names_to = "dim", values_to = "value") %>%
+  mutate(true = rep(x, iters))
+
+
+glimpse(steps_df)
+
+learning_plot <- ggplot(steps_df) +
+  geom_point(aes(x = true, y = value)) +
+  transition_manual(ix)
+
+anim_save("latent_learning_continuous.gif", learning_plot)
+```
+
+![](latent_learning_continuous.gif)
+
+
+# Amortized Variational Inference for Categorical Variables
+
+```{r gen latent variable data2}
+N_ <- 60
+N <- N_ + N_
+
+mu_1 <- 1
+mu_2 <- -1
+sigma <- 1
+
+y_1 <- rnorm(N_, mu_1, sigma)
+y_2 <- rnorm(N_, mu_2, sigma)
+y <- c(y_1, y_2)
+
+y_df <- data.frame(class = as.factor(c(rep(1, N_), rep(2, N_))), y = y)
+```
+
+
+```{r plot latent and observed categorical, warning = FALSE}
+y_df %>%
+  ggplot(aes(x = y, fill = class, group = class))+
+  geom_histogram(position = "identity", alpha = 0.5)
+```
+
+```{r amortized vi2}
+categorical_network <- function(x, params){
+  z <- x %*% params
+  z <- exp(z) / rowSums(exp(z))
+  z
+}
+
+normal_network <- function(x, params){
+  z <- x %*% params
+  z[,2] <- exp(z[,2])
+  z
+}
+
+prior_prob <- c(0.5, 0.5)
+ndraws <- 100
+
+kl_divergence <- function(encoder_params, decoder_params){
+  posterior_vals <- categorical_network(y, encoder_params)
+  #calculate elbo
+  kl <- sapply(1:ndraws, function(i){
+    #take samples from approximate distribution
+    z <- (runif(length(y)) <= posterior_vals[,1]) + 1 # convert to {1,2}
+    z_hot <- matrix(0, nrow = length(y), ncol = 2)
+    z_hot[cbind(1:length(y), z)] <- 1
+    y_params <- normal_network(z_hot, decoder_params)
+    kl_ <- sum(log(posterior_vals[cbind(1:length(y), z)])) - 
+      sum(dnorm(y, y_params[,1], y_params[,2], log = TRUE)) - 
+      sum(log(prior_prob[z]))
+    kl_
+  })
+  mean(kl)
+}
+
+# randomly initialize parameters
+encoder_params <- matrix(rnorm(2, 0, 0.01), nrow = 1)
+decoder_params <- matrix(rnorm(4, 0, 0.01), nrow = 2)
+
+iters <- 100
+h <- 1e-2
+h11 <- c(h, 0)
+h12 <- c(0, h)
+h21 <- matrix(c(h, 0, 0, 0), nrow = 2, byrow = TRUE)
+h22 <- matrix(c(0, h, 0, 0), nrow = 2, byrow = TRUE)
+h23 <- matrix(c(0, 0, h, 0), nrow = 2, byrow = TRUE)
+h24 <- matrix(c(0, 0, 0, h), nrow = 2, byrow = TRUE)
+step_size <- 1e-1
+encoder_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>%  setNames(c("b0", "b1"))
+decoder_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 4)) %>%  setNames(c("b0", "b1"))
+x_steps <- as.data.frame(matrix(0, nrow = iters, ncol = N))
+kls <- c()
+for(i in 1:iters){
+  #optimize encoder
+  #step encoder b1
+  gradient <- (kl_divergence(encoder_params + h11, decoder_params) - kl_divergence(encoder_params, decoder_params)) / h
+  encoder_params <- encoder_params - h11 * gradient * step_size
+  #step encoder b2
+  gradient <- (kl_divergence(encoder_params + h12, decoder_params) - kl_divergence(encoder_params, decoder_params)) / h
+  encoder_params <- encoder_params - h12 * gradient * step_size
+  #optimize decoder
+  #step decoder b11
+  gradient <- (kl_divergence(encoder_params, decoder_params + h21) - kl_divergence(encoder_params, decoder_params)) / h
+  decoder_params <- decoder_params - h21 * gradient * step_size
+  #step decoder b12
+  gradient <- (kl_divergence(encoder_params, decoder_params + h22) - kl_divergence(encoder_params, decoder_params)) / h
+  decoder_params <- decoder_params - h22 * gradient * step_size
+  #step decoder b21
+  gradient <- (kl_divergence(encoder_params, decoder_params + h23) - kl_divergence(encoder_params, decoder_params)) / h
+  decoder_params <- decoder_params - h23 * gradient * step_size
+  #step decoder b22
+  gradient <- (kl_divergence(encoder_params, decoder_params + h24) - kl_divergence(encoder_params, decoder_params)) / h
+  decoder_params <- decoder_params - h24 * gradient * step_size
+  
+  encoder_steps[i,] <- encoder_params
+  decoder_steps[i,] <- decoder_params
+  x_steps[i,] <- network(y, encoder_params)[,1]
+  kls <- c(kls, kl_divergence(encoder_params, decoder_params))
+}
+```
+
+```{r}
+plot(kls, type = "l")
+```
+
+```{r, include = F}
+library(gganimate)
+
+steps_df <- x_steps %>%
+  mutate(ix = row_number()) %>%
+  pivot_longer(-ix, names_to = "dim", values_to = "value") %>%
+  mutate(
+    class = as.factor(rep(c(rep(1,N_), rep(2,N_)), iters)),
+    y = rep(y, iters)
+  )
+
+steps_df %>%
+  filter(dim=="V1") %>%
+  pull(value) %>% plot()
+
+ggplot(steps_df, aes(x=ix, y=value, group=dim)) + 
+geom_line()
+
+glimpse(steps_df)
+
+yi <- rnorm(N)
+steps_df %>%
+  filter(ix==1) %>%
+ggplot( aes(y = yi, x = y, col = value,1)) +
+  geom_point() +
+  facet_grid(class ~ .) 
+```
+
+```{r}
+yi <- rep(rnorm(N), iters)
+learning_plot <- ggplot(steps_df, aes(y = value, x = y, color = class)) +
+  geom_point() +
+  transition_manual(ix)
+
+anim_save("latent_learning_class.gif", learning_plot)
+```
+
+![](latent_learning2.gif)
