@@ -333,7 +333,7 @@ For this we will generate data from mixture of normal distributions.
 
 $$
 class \sim bernoulli(0.5)
-y \sim Normal(\mu_c, \simga_c | class=c)
+y \sim Normal(\mu_c, \sigma_c | class=c)
 $$
 
 ```{r gen latent variable data}
