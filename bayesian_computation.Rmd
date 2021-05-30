@@ -6,6 +6,9 @@ output:
     df_print: paged
 ---
 
+[smthzch.github.io](smthzch.github.io)
+[Repo](https://github.com/smthzch/BayesianComputation) for this notebook.
+
 ```{r setup}
 options(tidyverse.quiet = TRUE)
 library(tidyverse)
@@ -213,7 +216,7 @@ E[\log q(\mu|x) - \log p(\mu, x) + \log p(x)]  = \\
 E[\log q(\mu|x) - \log p(x|\mu) - \log p(\mu) + \log p(x)]
 $$
 
-The last term $\log p(x)$ does not rely on $q(\mu|x)$ and is therefore constant within the optimization problem reducing the KL divergence to_search
+The last term $\log p(x)$ does not rely on $q(\mu|x)$ and is therefore constant within the optimization problem reducing the KL divergence to
 
 $$
 E[\log q(\mu|x) - \log p(x|\mu) - \log p(\mu)]
@@ -332,9 +335,13 @@ In this context a latent parameter is an unobserved variable related to each obs
 For this we will generate data from mixture of normal distributions.
 
 $$
-class \sim bernoulli(0.5)
-y \sim Normal(\mu_c, \sigma_c | class=c)
+Z \sim Categorical(0.5, 0.5) \\
+\mu_1 = -1 \\
+\mu_2 = 1 \\
+\sigma = 1 \\
+Y \sim Normal(\mu_z, \sigma | Z=z)
 $$
+
 
 ```{r gen latent variable data}
 N_ <- 60
@@ -345,11 +352,10 @@ sigma <- 1
 
 y_1 <- rnorm(N_, mus[1], sigma)
 y_2 <- rnorm(N_, mus[2], sigma)
-y <- c(sort(y_1), sort(y_2))
+y <- c(y_1, y_2)
 
 y_df <- data.frame(class = as.factor(c(rep(1, N_), rep(2, N_))), y = y)
 ```
-
 
 ```{r plot latent and observed categorical, warning = FALSE}
 y_df %>%
@@ -357,8 +363,13 @@ y_df %>%
   geom_histogram(position = "identity", alpha = 0.5)
 ```
 
-For simplicity we will assume that $\mu_1=-1$ and $\mu_1=1$ both with $\sigma=1$. 
-We could also solve for unknown $\mu$'s, which would be the fully bayesian equivalent to the EM algorithm.
+For our model let us again assume that $\sigma$ is known, so we must find the global $\mu$ parameters for each class, as well as the latent class parameter for each data point.
+
+Our joint model is then
+
+$$
+p(y,z) = \prod_N{p(y|\mu_z,\sigma)p(z)}
+$$
 
 Now that we have our data let us specify our posterior distribution and our KL divergence loss metric.
 
@@ -366,11 +377,12 @@ Now that we have our data let us specify our posterior distribution and our KL d
 prior_prob <- c(0.5, 0.5)
 ndraws <- 100
 
-kl_divergence <- function(y, posterior_vals, mu_params, sigma_params){
+kl_divergence <- function(y, posterior_vals, mu_mu_params, mu_sigma_params, sigma_params){
   #calculate elbo
   kl <- sapply(1:ndraws, function(i){
-    #take samples from approximate distribution
+    #take samples from approximate distributions
     z <- ifelse(runif(length(y)) <= posterior_vals[,1], 1, 2)
+    mu_params <- rnorm(2, mu_mu_params, mu_sigma_params)
     # calculate KL
     q_z <- sum(log(posterior_vals[cbind(1:length(y), z)])) # approximate posterior
     p_y_z <- sum(dnorm(y, mu_params[z], sigma_params[z], log = TRUE)) # likelihood
@@ -384,7 +396,8 @@ kl_divergence <- function(y, posterior_vals, mu_params, sigma_params){
 ```{r latent vi}
 # initialize parameters
 posterior_vals <- matrix(0.5, nrow = length(y), ncol = 2)
-mu_params <- c(-3, 3)
+mu_mu_params <- c(-3, 3)
+mu_sigma_params <- log(c(1, 1)) # take log to put parameters in unconstrained space
 sigma_params <- c(1, 1)
 
 iters <- 100
@@ -397,9 +410,11 @@ h2 <- c(0, 1)
 
 step_size <- 1e-1
 mu_step_size <- 1e-3
+sigma_step_size <- 1e-3
 
 posterior_steps <- as.data.frame(matrix(0, nrow = iters, ncol = length(y)))
-mu_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>% setNames(c("mu1", "mu2"))
+mu_mu_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>% setNames(c("mu1", "mu2"))
+mu_sigma_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>% setNames(c("sigma1", "sigma2"))
 kls <- c()
 
 for(i in 1:iters){  
@@ -409,8 +424,8 @@ for(i in 1:iters){
   offset_vals <- cbind(offset_vals, 1 - offset_vals)
   for(j in 1:N){
     # get gradient
-    gradient <- (kl_divergence(y[j], offset_vals[j,,drop=FALSE], mu_params, sigma_params) - 
-      kl_divergence(y[j], posterior_vals[j,,drop=FALSE], mu_params, sigma_params)) / h
+    gradient <- (kl_divergence(y[j], offset_vals[j,,drop=FALSE], mu_mu_params, exp(mu_sigma_params), sigma_params) - 
+                  kl_divergence(y[j], posterior_vals[j,,drop=FALSE], mu_mu_params, exp(mu_sigma_params), sigma_params)) / h
     posterior_vals[j, 1] <- 1 / (1 + exp(-log(posterior_vals[j,1] / posterior_vals[j,2]) - gradient * step_size))
     # step
     posterior_vals[j, 2] <- 1 - posterior_vals[j, 1]
@@ -418,19 +433,26 @@ for(i in 1:iters){
 
   # maximization
   # step mu1 params
-  gradient1 <- (kl_divergence(y, posterior_vals, mu_params + h_ * h1, sigma_params) - 
-    kl_divergence(y, posterior_vals, mu_params, sigma_params)) / h_
-  mu_params <- mu_params - h1 * gradient1 * mu_step_size
+  gradient11 <- (kl_divergence(y, posterior_vals, mu_mu_params + h_ * h1, exp(mu_sigma_params), sigma_params) - 
+                kl_divergence(y, posterior_vals, mu_mu_params, exp(mu_sigma_params), sigma_params)) / h_
+  mu_mu_params <- mu_mu_params - h1 * gradient11 * mu_step_size
+  gradient12 <- (kl_divergence(y, posterior_vals, mu_mu_params, exp(mu_sigma_params + h_ * h1), sigma_params) - 
+                kl_divergence(y, posterior_vals, mu_mu_params, exp(mu_sigma_params), sigma_params)) / h_
+  mu_sigma_params <- mu_sigma_params - h1 * gradient12 * sigma_step_size
   
   # step mu2 params
-  gradient2 <- (kl_divergence(y, posterior_vals, mu_params + h_ * h2, sigma_params) - 
-    kl_divergence(y, posterior_vals, mu_params, sigma_params)) / h_
-  mu_params <- mu_params - h2 * gradient2 * mu_step_size
+  gradient21 <- (kl_divergence(y, posterior_vals, mu_mu_params + h_ * h2, exp(mu_sigma_params), sigma_params) - 
+                kl_divergence(y, posterior_vals, mu_mu_params, exp(mu_sigma_params), sigma_params)) / h_
+  mu_mu_params <- mu_mu_params - h2 * gradient21 * mu_step_size
+  gradient22 <- (kl_divergence(y, posterior_vals, mu_mu_params, exp(mu_sigma_params + h_ * h2), sigma_params) - 
+                kl_divergence(y, posterior_vals, mu_mu_params, exp(mu_sigma_params), sigma_params)) / h_
+  mu_sigma_params <- mu_sigma_params - h2 * gradient22 * sigma_step_size
 
   # save intermediate values for later
   posterior_steps[i,] <- posterior_vals[,2]
-  mu_steps[i,] <- mu_params
-  kl <- kl_divergence(y, posterior_vals, mu_params, sigma_params)
+  mu_mu_steps[i,] <- mu_mu_params
+  mu_sigma_steps[i,] <- exp(mu_sigma_params)
+  kl <- kl_divergence(y, posterior_vals, mu_mu_params, exp(mu_sigma_params), sigma_params)
   kls <- c(kls, kl)
 }
 ```
@@ -450,13 +472,35 @@ steps_df <- posterior_steps %>%
     y = rep(y, iters)
   )
 
-mu_df <- mu_steps %>%
-  mutate(ix = row_number()) %>%
+# these steps convert the posterior parameters for mu into a density curve for the plots
+mu_df <- mu_mu_steps %>%
+  mutate(ix = row_number())# %>%
   pivot_longer(-ix, names_to = "mu", values_to = "mu_value")
+sigma_df <- mu_sigma_steps %>%
+  mutate(ix = row_number()) #%>%
+  pivot_longer(-ix, names_to = "sigma", values_to = "sigma_value")
+mu_sigma_df <- mu_df %>%
+  inner_join(sigma_df, by="ix") %>%
+  group_by(ix) %>%
+  nest() %>%
+  mutate(
+    density = map(data, ~{
+      x = seq(min(y), max(y), by=0.01)
+      data.frame(
+        x = x, 
+        mu1 = dnorm(x, .x$mu1, .x$sigma1),
+        mu2 = dnorm(x, .x$mu2, .x$sigma2)
+      )
+    })
+  ) %>%
+  unnest(density) %>%
+  select(-data) %>%
+  pivot_longer(starts_with("mu")) %>%
+  mutate(value = value / max(value))
 
 learning_plot <- ggplot(steps_df, aes(y = value, x = y, color = class)) +
   geom_point() +
-  geom_vline(data = mu_df, aes(xintercept = mu_value, color = mu)) +
+  geom_line(data = mu_sigma_df, aes(x = x, color = name, y = value)) +
   ggtitle("Posterior Probability of Class 2") +
   ylab("p(c=2)") +
   transition_manual(ix)
@@ -537,8 +581,10 @@ step_size <- 1e-2
 
 # data structures for saving intermediate valuess
 posterior_steps <- as.data.frame(matrix(0, nrow = iters, ncol = N))
-mu_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>% setNames(c("mu1", "mu2"))
+mu_mu_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>% setNames(c("mu1", "mu2"))
+mu_sigma_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>% setNames(c("sigma1", "sigma2"))
 kls <- c()
+
 for(i in 1:iters){
   # expectation
   # optimize encoder
@@ -572,7 +618,8 @@ for(i in 1:iters){
   
   # save intermediate values for later
   posterior_steps[i,] <- categorical_network(y, encoder_params)[,1]
-  mu_steps[i,] <- normal_network(c(1,2), decoder_params)
+  mu_mu_steps[i,] <- normal_network(c(1,2), decoder_params)[,1]
+  mu_sigma_steps[i,] <- normal_network(c(1,2), decoder_params)[,2]
   kls <- c(kls, kl_divergence(encoder_params, decoder_params))
 }
 ```
@@ -591,13 +638,35 @@ steps_df <- posterior_steps %>%
     y = rep(y, iters)
   )
 
-mu_df <- mu_steps %>%
-  mutate(ix = row_number()) %>%
+# these steps convert the posterior parameters for mu into a density curve for the plots
+mu_df <- mu_mu_steps %>%
+  mutate(ix = row_number())# %>%
   pivot_longer(-ix, names_to = "mu", values_to = "mu_value")
+sigma_df <- mu_sigma_steps %>%
+  mutate(ix = row_number()) #%>%
+  pivot_longer(-ix, names_to = "sigma", values_to = "sigma_value")
+mu_sigma_df <- mu_df %>%
+  inner_join(sigma_df, by="ix") %>%
+  group_by(ix) %>%
+  nest() %>%
+  mutate(
+    density = map(data, ~{
+      x = seq(min(y), max(y), by=0.01)
+      data.frame(
+        x = x, 
+        mu1 = dnorm(x, .x$mu1, .x$sigma1),
+        mu2 = dnorm(x, .x$mu2, .x$sigma2)
+      )
+    })
+  ) %>%
+  unnest(density) %>%
+  select(-data) %>%
+  pivot_longer(starts_with("mu")) %>%
+  mutate(value = value / max(value))
 
 learning_plot <- ggplot(steps_df, aes(y = value, x = y, color = class)) +
   geom_point() +
-  geom_vline(data = mu_df, aes(xintercept = mu_value, color = mu)) +
+  geom_line(data = mu_sigma_df, aes(x = x, color = name, y = value)) +
   ggtitle("Posterior Probability of Class 2") +
   ylab("p(c=2)") +
   transition_manual(ix)
@@ -608,3 +677,9 @@ anim_save("amortized_latent_learning.gif", learning_plot)
 ```{r}
 knitr::include_graphics("amortized_latent_learning.gif")
 ```
+
+## References
+
+[Bayesian Data Analysis](http://www.stat.columbia.edu/~gelman/book/)
+
+[Variational Inference: A Review for Statisticians](https://arxiv.org/abs/1601.00670)
