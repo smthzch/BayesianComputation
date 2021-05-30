@@ -14,7 +14,7 @@ options(tidyverse.quiet = TRUE)
 library(tidyverse)
 library(gganimate)
 
-set.seed(2021)
+set.seed(20210530)
 ```
 
 This notebook was developed to provide an intuitive understanding of different bayesian inference techniques and the actual computations behind them. 
@@ -375,6 +375,8 @@ Now that we have our data let us specify our posterior distribution and our KL d
 
 ```{r latent vi kl divergence}
 prior_prob <- c(0.5, 0.5)
+prior_mu <- 0
+prior_sigma <- 10
 ndraws <- 100
 
 kl_divergence <- function(y, posterior_vals, mu_mu_params, mu_sigma_params, sigma_params){
@@ -386,8 +388,9 @@ kl_divergence <- function(y, posterior_vals, mu_mu_params, mu_sigma_params, sigm
     # calculate KL
     q_z <- sum(log(posterior_vals[cbind(1:length(y), z)])) # approximate posterior
     p_y_z <- sum(dnorm(y, mu_params[z], sigma_params[z], log = TRUE)) # likelihood
-    p_z <- sum(log(prior_prob[z])) #prior
-    q_z - p_y_z - p_z
+    p_z <- sum(log(prior_prob[z])) # class prior
+    p_mu <- sum(dnorm(mu_params, prior_mu, prior_sigma)) # mu prior
+    q_z - p_y_z - p_z# - p_mu
   })
   mean(kl)
 }
@@ -404,13 +407,13 @@ iters <- 100
 # perturbation for posterior z
 h <- 1
 # perturbation for mu values
-h_ <- 1e-1
+h_ <- 1e-2
 h1 <- c(1, 0)
 h2 <- c(0, 1)
 
 step_size <- 1e-1
-mu_step_size <- 1e-3
-sigma_step_size <- 1e-3
+mu_step_size <- 1e-5
+sigma_step_size <- 1e-5
 
 posterior_steps <- as.data.frame(matrix(0, nrow = iters, ncol = length(y)))
 mu_mu_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>% setNames(c("mu1", "mu2"))
@@ -474,11 +477,9 @@ steps_df <- posterior_steps %>%
 
 # these steps convert the posterior parameters for mu into a density curve for the plots
 mu_df <- mu_mu_steps %>%
-  mutate(ix = row_number())# %>%
-  pivot_longer(-ix, names_to = "mu", values_to = "mu_value")
+  mutate(ix = row_number())
 sigma_df <- mu_sigma_steps %>%
-  mutate(ix = row_number()) #%>%
-  pivot_longer(-ix, names_to = "sigma", values_to = "sigma_value")
+  mutate(ix = row_number())
 mu_sigma_df <- mu_df %>%
   inner_join(sigma_df, by="ix") %>%
   group_by(ix) %>%
@@ -618,8 +619,8 @@ for(i in 1:iters){
   
   # save intermediate values for later
   posterior_steps[i,] <- categorical_network(y, encoder_params)[,1]
-  mu_mu_steps[i,] <- normal_network(c(1,2), decoder_params)[,1]
-  mu_sigma_steps[i,] <- normal_network(c(1,2), decoder_params)[,2]
+  mu_mu_steps[i,] <- normal_network(matrix(c(1,0,0,1), nrow=2), decoder_params)[,1]
+  mu_sigma_steps[i,] <- normal_network(matrix(c(1,0,0,1), nrow=2), decoder_params)[,2]
   kls <- c(kls, kl_divergence(encoder_params, decoder_params))
 }
 ```
@@ -640,11 +641,9 @@ steps_df <- posterior_steps %>%
 
 # these steps convert the posterior parameters for mu into a density curve for the plots
 mu_df <- mu_mu_steps %>%
-  mutate(ix = row_number())# %>%
-  pivot_longer(-ix, names_to = "mu", values_to = "mu_value")
+  mutate(ix = row_number())
 sigma_df <- mu_sigma_steps %>%
-  mutate(ix = row_number()) #%>%
-  pivot_longer(-ix, names_to = "sigma", values_to = "sigma_value")
+  mutate(ix = row_number())
 mu_sigma_df <- mu_df %>%
   inner_join(sigma_df, by="ix") %>%
   group_by(ix) %>%
