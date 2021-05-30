@@ -7,6 +7,7 @@ output:
 ---
 
 [smthzch.github.io](smthzch.github.io)
+
 [Repo](https://github.com/smthzch/BayesianComputation) for this notebook.
 
 ```{r setup}
@@ -14,7 +15,7 @@ options(tidyverse.quiet = TRUE)
 library(tidyverse)
 library(gganimate)
 
-set.seed(20210530)
+set.seed(2021)
 ```
 
 This notebook was developed to provide an intuitive understanding of different bayesian inference techniques and the actual computations behind them. 
