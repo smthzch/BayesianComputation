@@ -115,7 +115,7 @@ $$
 
 In some cases we may choose a prior for $/mu$ which we are unable or unwilling to solve for $p(x)$ analytically. In that case we cannot analytically recover the posterior $p(\mu|x)$, however, using Markov Chain Monte Carlo we can sample from the posterior.
 
-If we use the same prior distribution and parameters as before $\mu_\mu=2,\sigma_\mu=2$,  that means we wish to draw samples that are normally distributed with mean 3.47 and standard deviation 1.08 without actually knowing those parameters.
+If we use the same prior distribution and parameters as before $\mu_\mu=3,\sigma_\mu=2$,  that means we wish to draw samples that are normally distributed with mean 3.47 and standard deviation 1.08 without actually knowing those parameters.
 
 There are different methods for performing this sampling (Gibbs, Hamiltonian, Metropolis Hastings), but the basic idea behind all of them is that we generate a series of random samples (Monte Carlo), with each sample being dependent on the previous one (Markov Chain). By being particular about which of the samples in this series we keep we can shape an arbitrary proposal distribution into producing samples that match our posterior distribution.
 
@@ -332,7 +332,7 @@ In the previous section we had the fortune of working with a model that had a kn
 But we are not restricted to using the same family of distribution for the approximate distribution.
 In fact when using varitional methods we are often working on models in which we don't know the true posterior distribution.
 To see what happens when the approximate distribution family does not match the true posterior,
-let's use the same generative model as before, but lets use a gamma distribution.
+we will use the same generative model as before, but use a exponential distribution as the approximate distribution.
 
 You will notice that this approximate distribution is a poor fit immediately due to it being bounded on the low end by 0.
 
@@ -356,6 +356,9 @@ kl_divergence <- function(posterior_mu){
   mean(kl) #take expectation
 }
 ```
+
+The exponential distribution only has one parameter $\beta$ that needs to be optimized. 
+Because $\beta>0$ we will optimize it in unconstrained space by taking the $\log$ of it.
 
 ```{r mismatch vi coordinate descent}
 # initialize the parameters
