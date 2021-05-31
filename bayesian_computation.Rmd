@@ -326,6 +326,79 @@ to_search %>%
   geom_path(data = posterior_steps, aes(x = mu, y = sigma), col="red")
 ```
 
+## Variational Inference Posterior Mismatch
+
+In the previous section we had the fortune of working with a model that had a known posterior distribution so we could match the family of the approximate distribution to this known family providing us with accurate posterior parameter predictions.
+But we are not restricted to using the same family of distribution for the approximate distribution.
+In fact when using varitional methods we are often working on models in which we don't know the true posterior distribution.
+To see what happens when the approximate distribution family does not match the true posterior,
+let's use the same generative model as before, but lets use a gamma distribution.
+
+You will notice that this approximate distribution is a poor fit immediately due to it being bounded on the low end by 0.
+
+```{r mismatch approximate posterior}
+q_z <- rexp
+```
+
+```{r mismatch kl divergence}
+n_draws = 100 #number of draws for the expectation in KL divergence
+
+kl_divergence <- function(posterior_mu){
+  #take samples from approximate posterior distribution
+  z <- q_z(n_draws, posterior_mu)
+  #calculate elbo
+  kl <- sapply(z, function(z_i){
+    q_z <- dexp(z_i, posterior_mu, log = TRUE)
+    p_x_z <- sum(dnorm(x, z_i, sigma, log = TRUE)) 
+    p_z <- dnorm(z_i, prior_mu, prior_sigma, log = TRUE)
+    q_z - p_x_z - p_z
+  })
+  mean(kl) #take expectation
+}
+```
+
+```{r mismatch vi coordinate descent}
+# initialize the parameters
+mu_beta_kl <- -1 #this is in log domain because beta is lower bounded at 0, need to exponentiate
+
+# optimization settings
+iters <- 4000
+h <- 1e-1 # perturb the parameter by this much to estimate the gradient 
+step_size <- 1e-4
+# track how the posterior parameters change over the iterations
+posterior_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 1)) %>%  setNames(c("mu"))
+kls <- c() # collect the kl divergence values here
+
+for(i in 1:iters){
+  # step mu
+  gradient1 <- (kl_divergence(exp(mu_beta_kl + h)) - kl_divergence(exp(mu_beta_kl))) / h # finite difference for gradient
+  mu_beta_kl <- mu_beta_kl - gradient1 * step_size
+    
+  
+  posterior_steps[i,] <- exp(mu_beta_kl)
+  kls <- c(kls, kl_divergence(exp(mu_beta_kl)))
+}
+```
+
+```{r plot mismatch kl divergence}
+plot(kls, type = "l")
+```
+
+And lets see how our approximate distribution compares to the previous estimates.
+
+```{r report vi mismatch estimate}
+estimates <- rbind(estimates, data.frame(method = "VI-Mismatch", mu_mu = exp(mu_beta_kl), mu_sigma = NA))
+knitr::kable(estimates)
+```
+
+
+```{r plot mismatch posterior}
+x1 <- seq(-5, 10, by = 0.1)
+plot(y = dexp(x1, exp(mu_beta_kl)), x = x1, type = "l", lty = 1)
+lines(y = dnorm(x1, mu_mu_conj, mu_sigma_conj ), x = x1, lty = 2)
+legend("topright", legend=c("Approximate Posterior", "Conjugate Posterior"), lty=c(1, 2))
+```
+
 # Latent Variable Variational Inference
 
 In the previous section we used various methods to calculate or estimate the posterior distribution of a single, global parameter. 
