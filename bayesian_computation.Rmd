@@ -31,14 +31,14 @@ This notebook is composed of two main sections representing two common problems 
 Suppose we have a random variable $X$ that is distributed
 
 $$
-\mu = 3 \\
+\mu = 2 \\
 \sigma = 10 \\
 X \sim Normal(\mu, \sigma )
 $$
 
 ```{r generate data}
 N <- 60
-mu <- 3
+mu <- 2
 sigma <- 10
 x <- rnorm(N, mu, sigma)
 
@@ -85,7 +85,7 @@ $$
 In this case lets set the hyperparameters for $\mu$ as:
 
 $$
-\mu_\mu = 2 \\
+\mu_\mu = 3 \\
 \sigma_\mu = 2 \\
 \mu \sim N(\mu_\mu, \sigma_\mu) \\
 \sigma = 10 \\
@@ -93,7 +93,7 @@ X \sim N(\mu, \sigma )
 $$
 
 ```{r conjugate estimates}
-prior_mu <- 2
+prior_mu <- 3
 prior_sigma <- 2
 
 mu_mu_conj <- (prior_mu / prior_sigma^2 + sum(x) / sigma^2) / (1 / prior_sigma^2 + N / sigma^2) # posterior mean for mu
@@ -103,10 +103,10 @@ estimates <- data.frame(method = "Conjugate", mu_mu = mu_mu_conj, mu_sigma = mu_
 knitr::kable(estimates)
 ```
 
-This gives us an estimate of the mean of $\mu$ of about 3.47 with a standard deviation of about 1.08, so our posterior $p(\mu|x)$ is distributed:
+This gives us an estimate of the mean of $\mu$ of about 1.59 with a standard deviation of about 1.08, so our posterior $p(\mu|x)$ is distributed:
 
 $$
-\mu_{\mu|x} = 3.47 \\
+\mu_{\mu|x} = 1.60 \\
 \sigma_{\mu|x} = 1.08 \\
 \mu \sim Normal(\mu_{\mu|x}, \sigma_{\mu|x})
 $$
@@ -391,7 +391,7 @@ kl_divergence <- function(y, posterior_vals, mu_mu_params, mu_sigma_params, sigm
     p_y_z <- sum(dnorm(y, mu_params[z], sigma_params[z], log = TRUE)) # likelihood
     p_z <- sum(log(prior_prob[z])) # class prior
     p_mu <- sum(dnorm(mu_params, prior_mu, prior_sigma)) # mu prior
-    q_z - p_y_z - p_z# - p_mu
+    q_z - p_y_z - p_z - p_mu
   })
   mean(kl)
 }
@@ -404,17 +404,17 @@ mu_mu_params <- c(-3, 3)
 mu_sigma_params <- log(c(1, 1)) # take log to put parameters in unconstrained space
 sigma_params <- c(1, 1)
 
-iters <- 100
+iters <- 300
 # perturbation for posterior z
 h <- 1
 # perturbation for mu values
-h_ <- 1e-2
+h_ <- 1e-1
 h1 <- c(1, 0)
 h2 <- c(0, 1)
 
 step_size <- 1e-1
-mu_step_size <- 1e-5
-sigma_step_size <- 1e-5
+mu_step_size <- 1e-4
+sigma_step_size <- 1e-4
 
 posterior_steps <- as.data.frame(matrix(0, nrow = iters, ncol = length(y)))
 mu_mu_steps <- as.data.frame(matrix(0, nrow = iters, ncol = 2)) %>% setNames(c("mu1", "mu2"))
