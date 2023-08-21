@@ -1,0 +1,239 @@
+---
+title: "Computational Bayes: Conjugacy and MCMC"
+author: "Zach Smith"
+output:
+  html_document:
+    df_print: paged
+embed-resources: true
+---
+
+[smthzch.github.io](smthzch.github.io)
+
+[Repo](https://github.com/smthzch/computational-bayes) for this notebook.
+
+```{python}
+import numpy as np
+import scipy.stats as ss
+import pandas as pd
+import matplotlib.pyplot as plt
+
+np.random.seed(2023)
+```
+
+This post aims to provide an intuitive understanding of different bayesian inference techniques and the actual computations behind them. 
+The focus is on the what and how and not on the why. 
+Mathematical derivations for *why* a technique works are left for further research, instead I hope to demonstrate what each inference technique aims to accomplish and show how to accomplish this by implementing simple solutions with minimal tooling to make the mechanics visible and easily understood. 
+I also hope to show how each technique relates to the other to help provide a unified picture of what we are trying to accomplish in bayesian inference.
+
+Suppose we have a random variable $X$ that is distributed
+
+$$
+\begin{aligned}
+& \mu = 2 \\
+& \sigma = 1 \\
+& X \sim Normal(\mu, \sigma )
+\end{aligned}
+$$
+
+```{python}
+N = 60
+mu = 2
+sigma = 1
+x = np.random.normal(mu, sigma, N)
+
+plt.hist(x);
+```
+
+If $\mu$ is unknown how do we perform inference? 
+In bayesian inference we hope to find the posterior of a parameter given some data $p(\mu|X=x)$. 
+We can accomplis this using bayes rule:
+
+$$
+p(\mu|x) = \frac{p(x|\mu)p(\mu)}{\int_{\mu} p(x,\mu)d\mu} = \frac{p(x|\mu)p(\mu)}{p(x)}
+$$
+
+By specifying a prior over $\mu$ we can then update this distribution given some data to produce a posterior distribution.
+Three common methods for solving this problem follow.
+
+1. [Conjugate Prior](#conjugate-prior)
+2. [MCMC]($mcmc)
+3. Variational Inference
+
+This post will focus on 1 and 2. 
+Variational inference will be handled in a later post.
+
+# Conjugate Prior
+
+By matching the likelihood distribution with a conjugate prior we can solve for $p(x)$ analytically and recover a posterior distribution whose parameters can be estimated analytically as well.
+
+A normal distribution is the conjugate prior for $\mu$ when the data likelihood is also a normal distribution and the standard deviation is known.
+
+$$
+\mu \sim Normal(\mu_\mu, \sigma_\mu)
+$$
+
+The parameter estimates for the posterior distribution of $\mu$ are:
+
+$$
+\begin{aligned}
+& \mu_{\mu|x} = \frac{\frac{\mu_\mu}{\sigma_\mu^2} + \frac{\sum X}{\sigma^2}}{1/\sigma_\mu^2 + N/\sigma^2} \\
+& \sigma_{\mu|x} = \sqrt{\frac{1}{\frac{1}{\sigma_mu^2} + \frac{N}{\sigma^2}}} 
+\end{aligned}
+$$
+
+In this case lets set the hyperparameters for $\mu$ as:
+
+$$
+\begin{aligned}
+& \mu_\mu = 0 \\
+& \sigma_\mu = 10 \\
+& \mu \sim N(\mu_\mu, \sigma_\mu) \\
+& \sigma = 1 \\
+& X \sim N(\mu, \sigma )
+\end{aligned}
+$$
+
+```{python}
+prior_mu = 0
+prior_sigma = 10
+
+mu_mu_conj = (prior_mu / prior_sigma**2 + sum(x) / sigma**2) / (1 / prior_sigma**2 + N / sigma**2) # posterior mean for mu
+mu_sigma_conj = np.sqrt(1 / (1 / prior_sigma**2 + N / sigma**2)) # posterior sd for mu
+
+estimates = pd.DataFrame(
+    {
+        "method": "Conjugate", 
+        "mu_mu": mu_mu_conj, 
+        "mu_sigma": mu_sigma_conj
+    },
+    index=[0]
+)
+estimates
+```
+
+This gives us an estimate of the mean of $\mu$ of about 1.78 with a standard deviation of about 0.13, so our posterior $p(\mu|x)$ is distributed:
+
+$$
+\begin{aligned}
+& \mu_{\mu|x} = 1.78 \\
+& \sigma_{\mu|x} = 0.13 \\
+& \mu \sim Normal(\mu_{\mu|x}, \sigma_{\mu|x})
+\end{aligned}
+$$
+
+# MCMC
+
+In some cases we may choose a prior for $/mu$ which we are unable or unwilling to solve for $p(x)$ analytically. 
+In that case we cannot analytically recover the posterior $p(\mu|x)$, however, using Markov Chain Monte Carlo we can sample from the posterior.
+
+If we use the same prior distribution and parameters as before $\mu_\mu=0,\sigma_\mu=10$,  that means we wish to draw samples that are normally distributed with mean 1.78 and standard deviation 0.13 without actually knowing those parameters.
+
+There are different methods for performing this sampling (Gibbs, Hamiltonian, Metropolis Hastings), but the basic idea behind all of them is that we generate a series of random samples (Monte Carlo), with each sample being dependent on the previous one (Markov Chain). 
+By being particular about which of the samples in this series we keep we can shape an arbitrary proposal distribution into producing samples that match our posterior distribution.
+
+For this we will use one of the simplest MCMC sampling methods, Metropolis Hastings. There are two main components to an MCMC sampler:
+
+1. A proposal distribution. This is an arbitrary distribution which we use to draw samples from.
+2. An acceptance rule. This is a rule dependent on the previous sample and current sample to determine whether or not to keep the current sample.
+
+For the proposal distribution we will use a normal distribution centered at the previous sample location (Markov Chain) with a standard deviation of 1.
+
+$$
+\mu_1 \sim Normal(\mu_0, 1)
+$$
+
+```{python}
+# we need a proposal distribution 
+# very tiny jumps == high acceptance rate but slow mixing
+jump_sigma = 1
+
+def proposal(mu_):
+    return np.random.normal(mu_, jump_sigma) 
+```
+
+The proposal distribution can be any distribution we want. 
+The choice of a symmetric distribution where $p(\mu_1|\mu_0)=p(\mu_0|\mu_1)$ simplifies the acceptance rule for us. 
+The choice the standard deviation of 1 is also fairly arbitrary, in theory it will not affect the results, but in practice it influences how quickly the markov chain explores the posterior (larger sd will jump to farther away locations in the posterior) as well as our overall acceptance probabilities (larger sd will result in lower acceptance probabilities) which both influence how long we need to run our chain.
+
+For Metropolis Hastings with a symmetric proposal distribution the acceptance rule is the ratio of the posterior likelihood given the proposed $\mu$ over the posterior likelihood given the previous $\mu$
+
+$$
+p(Accept) =  \frac{p(\mu_1|x)}{p(\mu_0|x)} = \frac{p(x|\mu_1)p(\mu_1|\mu_\mu,\sigma_\mu)}{p(x|\mu_0)p(\mu_0|\mu_\mu,\sigma_\mu)}
+$$
+
+```{python}
+def p_accept(mu1, mu0):
+    # calculations done in log for numerical stability (prevent underflows)
+    log_likelihood1 = ss.norm.logpdf(mu1, prior_mu, prior_sigma) + ss.norm.logpdf(x, mu1, sigma).sum()
+    log_likelihood0 = ss.norm.logpdf(mu0, prior_mu, prior_sigma) + ss.norm.logpdf(x, mu0, sigma).sum()
+    return np.exp(log_likelihood1 - log_likelihood0)
+
+```
+
+Now that we have a proposal distribution and an acceptance rule we can run our MCMC algorithm.
+
+```{python}
+mu0 = np.random.normal(prior_mu, prior_sigma) # select initial value from the prior (can be done other ways)
+mus = [] # collect the markov chain values here
+# run Metropolis Hastings MCMC
+iters = 10000
+for i in range(iters):
+  mu1 = proposal(mu0) # propose new mu based on current mu
+  acceptance_ratio = p_accept(mu1, mu0) # calculate acceptance probability
+  # accept or reject with probability equal to acceptance_ratio
+  u = np.random.uniform()
+  mu0 = mu1 if u <= acceptance_ratio else mu0 # if accept current mu it becomes previous mu for next step
+  mus += [mu0] # add current sample value to chain
+
+# drop warmup samples
+mus = mus[100:]
+```
+
+By calculating summary statistics on the sampled values we can see if they match the analytical solution.
+
+```{python}
+mu_mu_mcmc = np.mean(mus)
+mu_sigma_mcmc = np.std(mus)
+
+estimates = pd.concat(
+    [
+        estimates, 
+        pd.DataFrame(
+            {
+                "method": "MCMC", 
+                "mu_mu": mu_mu_mcmc, 
+                "mu_sigma": mu_sigma_mcmc
+            }, 
+            index=[0]
+        )
+    ],
+    ignore_index=True
+)
+estimates
+```
+
+We see they are fairly close, showing that we were able to sample from the posterior distribution. 
+Lets plot the sampled distribution against the true posterior.
+
+```{python}
+x1 = np.linspace(mu_mu_conj - 3 * mu_sigma_conj, mu_mu_conj + 3 * mu_sigma_conj, 300)
+plt.hist(mus, bins=30, density=True, label="mcmc");
+plt.plot(x1, ss.norm.pdf(x1, mu_mu_conj, mu_sigma_conj), label="conjugate");
+plt.legend();
+plt.title("Posterior Distributions");
+```
+
+There you have it. 
+We have performed Bayesian inference using both conjugate priors and MCMC.
+As you can see the actual machinery to perform MCMC is quite simple.
+The trick is in setting things up properly so that the math simplifies properly.
+
+In practice you would almost never set up your own MCMC sampler.
+Tools such as [Stan](https://mc-stan.org) and [Numpyro](https://num.pyro.ai/en/latest/index.html) do it much better and allow for much more complex models while still sampling quickly.
+
+
+## References
+
+[Bayesian Data Analysis](http://www.stat.columbia.edu/~gelman/book/)
+
+[Variational Inference: A Review for Statisticians](https://arxiv.org/abs/1601.00670)
