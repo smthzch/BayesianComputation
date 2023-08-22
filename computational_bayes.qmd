@@ -482,7 +482,7 @@ kl_divergence <- function(y, posterior_vals, mu_mu_params, mu_sigma_params, sigm
     q_z <- sum(log(posterior_vals[cbind(1:length(y), z)])) # approximate posterior
     p_y_z <- sum(dnorm(y, mu_params[z], sigma_params[z], log = TRUE)) # likelihood
     p_z <- sum(log(prior_prob[z])) # class prior
-    p_mu <- sum(dnorm(mu_params, prior_mu, prior_sigma)) # mu prior
+    p_mu <- sum(dnorm(mu_params, prior_mu, prior_sigma, log = TRUE)) # mu prior
     q_z - p_y_z - p_z - p_mu
   })
   mean(kl)
