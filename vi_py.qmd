@@ -22,10 +22,10 @@ from scipy.special import logsumexp
 np.random.seed(2023)
 ```
 
-This post continues from the [previous post](https://smthzch.github.io/conjugate-mcmc_py.html) exploring different bayesian inference techniques and the computations behind them. 
+This post continues from the [previous post](https://smthzch.github.io/conjugate-mcmc_py.html) exploring different Bayesian inference techniques and the computations behind them. 
 The focus is on the what and how and not on the why. 
 Mathematical derivations for *why* a technique works are left for further research, instead I hope to demonstrate what each inference technique aims to accomplish and show how to accomplish this by implementing simple solutions with minimal tooling to make the mechanics visible and easily understood. 
-I also hope to show how each technique relates to the other to help provide a unified picture of what we are trying to accomplish in bayesian inference.
+I also hope to show how each technique relates to the other to help provide a unified picture of what we are trying to accomplish in Bayesian inference.
 
 This post focuses on variational inference (VI). 
 While MCMC aims to produce samples from a potentially intractable posterior, in VI we specify an approximate distribution for the posterior and optimize the parameters to most closely fit the true posterior.
@@ -35,27 +35,36 @@ In this post we will look at two main problems in Bayesian inference
 1. Parameter inference (global parameters)
 2. Latent variable inference (local parameters)
 
-The parameter inference section will follow along the same problem as in the previous post, trying to estimate the unknow $\mu$ parameter for some distribution.
+The parameter inference section will follow along the same problem as in the previous post, trying to estimate the unknown $\mu$ parameter for some distribution.
 The latent variable inference will look at a more interesting problem of inferring latent local parameters, and use VI to solve it in two different ways.
 
-From the previous post we estimated the conjugate posterior distribution for $\mu$ to be 
+From the previous post we were trying to estimate the unknown $\mu$ parameter for data drawn from a normal distribution with known variance.
+
+$$
+\begin{aligned}
+& \mu = 2 \\
+& \sigma = 1 \\
+& X \sim \text{Normal}(\mu, \sigma )
+\end{aligned}
+$$
+
+We placed a normal distribution prior on $\mu$
 
 $$
 \begin{aligned}
 & \mu_\mu = 0 \\
 & \sigma_\mu = 10 \\
-& \mu \sim N(\mu_\mu, \sigma_\mu) \\
-& \sigma = 1 \\
-& X \sim N(\mu, \sigma )
+& \mu \sim \text{Normal}(\mu_\mu, \sigma_\mu) \\
 \end{aligned}
 $$
 
+Giving us the conjugate posterior distribution for $\mu$ to be 
 
 $$
 \begin{aligned}
 & \mu_{\mu|x} = 1.78 \\
 & \sigma_{\mu|x} = 0.13 \\
-& \mu \sim Normal(\mu_{\mu|x}, \sigma_{\mu|x})
+& \mu \sim \text{Normal}(\mu_{\mu|x}, \sigma_{\mu|x})
 \end{aligned}
 $$
 
@@ -78,18 +87,18 @@ estimates = pd.DataFrame(
 )
 ```
 
-Let's see if we can recover this distribution using varitional inference.
+Let's see if we can recover this distribution using variational inference.
 
 # Variational Inference
 
-Perhaps we are impatient with MCMC so we would like to turn this into an optimization problem. We can do this using variational inference. In this scenario we will specify an approximating posterior distribution $q(\mu|x)$ along with the prior distribution. This posterior distribution can be any distribution we like but our goal is the select a distribution that can match the true posterior as closely as possible. We then optimize the parameters of the approximate posterior to do this.
+Rather than sampling from the posterior like with MCMC, variational inference turns this into an optimization problem. To do so we will specify an approximating distribution for the posterior $q(\mu|x)$ along with the prior distribution. This posterior distribution can be any distribution we like, but our goal is the select a distribution that can match the true posterior as closely as possible. We then optimize the parameters of the approximate posterior to minimize KL divergence between the approximate posterior and the true posterior.
 
 Because we are using conjugate priors we actually know that the true posterior is normally distributed, so first let's pick the normal as our approximate distribution and see if we can properly recover the parameters. Next, we will try using a distribution that cannot so closely approximate the true normal posterior and see what happens.
 
 With a normal distribution as our posterior we have two parameters to optimize for it, $\mu_q$ and $\sigma_q$.
 
 $$
-q(\mu|x) \sim Normal(\mu_q, \sigma_q)
+q(\mu|x) \sim \text{Normal}(\mu_q, \sigma_q)
 $$
 
 ```{python}
@@ -132,7 +141,7 @@ def kl_divergence(posterior_mu, posterior_sigma):
   return np.mean(kl) #take expectation
 ```
 
-All that is left is to optimize the `posterior_mu` and `posterior_sigma`. Some sort of gradient descent is generally used, but lets to a grid search over the parameter space so we can look at how kl divergence changes across this space. We will calculate the KL divergence at each combination of proposed `posterior_mu` and `posterior_sigma`, select the combination that produces the lowest value, and plot it on the space of values.
+All that is left is to optimize the `posterior_mu` and `posterior_sigma`. Some sort of gradient descent is generally used, but lets do a grid search over the parameter space so we can look at how kl divergence changes across this space. We will calculate the KL divergence at each combination of proposed `posterior_mu` and `posterior_sigma`, select the combination that produces the lowest value, and plot it on the space of values.
 
 ```{python}
 # grid search over all combinations of mu_vals and sigma_vals
@@ -183,7 +192,7 @@ plt.xlabel("mu_mu");
 plt.ylabel("mu_sigma");
 ```
 
-While performing grid search is a useful way for visualizing the shape of the parameter space, in practice it is generally too computationally intensive and requires very tight grid spacing to recover the optimal paramters.
+While performing grid search is a useful way for visualizing the shape of the parameter space, in practice it is generally too computationally intensive and requires very tight grid spacing to recover the optimal parameters.
 
 Now lets perform a very simplified form of gradient descent. We will be performing coordinate descent, where we optimize each parameter independently. This makes the updates simple to perform, though in more complex parameter spaces it will not perform well.
 
@@ -265,7 +274,7 @@ plt.ylabel("mu_sigma");
 
 In the previous section we had the fortune of working with a model that had a known posterior distribution so we could match the family of the approximate distribution to this known family providing us with accurate posterior parameter predictions.
 But we are not restricted to using the same family of distribution for the approximate distribution.
-In fact when using varitional methods we are often working on models in which we don't know the true posterior distribution.
+In fact when using variational methods we are often working on models in which we don't know the true posterior distribution.
 To see what happens when the approximate distribution family does not match the true posterior,
 we will use the same generative model as before, but use a exponential distribution as the approximate distribution.
 
@@ -368,7 +377,7 @@ $$
 & \mu_1 = -1 \\
 & \mu_2 = 1 \\
 & \sigma = 1 \\
-& Y \sim Normal(\mu_z, \sigma | Z=z)
+& Y \sim \text{Normal}(\mu_z, \sigma | Z=z)
 \end{aligned}
 $$
 
@@ -544,7 +553,7 @@ ani.save("latent_learning_py.gif", fps=30);
 
 # Amortized Variational Inference
 
-Amortized variational inference is really where VI is set free and we can start utilizing deep learning methods within bayesian models. 
+Amortized variational inference is really where VI is set free and we can start utilizing deep learning methods within Bayesian models. 
 This is the method that allows for variational auto-encoders.
 
 Amortized inference is motivated by the fact that in complex latent models the number of parameters that needs to be estimated, grows with the size of the dataset. 
